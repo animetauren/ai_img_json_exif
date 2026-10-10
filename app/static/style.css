@@ -1,0 +1,976 @@
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --border: #d6d9de;
+  --text: #1d2125;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --error: #c62828;
+  --ok: #2e7d32;
+  --drop: #eef2ff;
+  --box: #ff3d71;
+  --bar: #2563eb;
+  --tile-new: #a3a9b3;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --surface: #1e2125;
+    --border: #33373d;
+    --text: #e6e8eb;
+    --muted: #9aa1ab;
+    --accent: #4f8cff;
+    --error: #ef5350;
+    --ok: #66bb6a;
+    --drop: #1f2633;
+    --bar: #4f8cff;
+    --tile-new: #555b64;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* ---------- backend / mode switching ---------- */
+/* data-mode is the tab; data-kind is single or workflow (the Batch tab runs either one) */
+.settings .llm-only, .settings .vision-only, .settings .single-only,
+.settings .workflow-only, .settings .batch-only { display: contents; }
+body[data-backend="vision"] .llm-only,
+body[data-backend="llm"] .vision-only,
+body[data-kind="workflow"] .single-only,
+body[data-kind="single"] .workflow-only,
+body:not([data-mode="batch"]):not([data-app="video"]) .batch-only, /* Tag scenes has Run with too */
+body[data-mode="batch"] .not-batch,
+/* Batch: the grid fills the left column until a photo is focused */
+body[data-mode="batch"]:not([data-focus]) .left,
+body[data-mode="batch"][data-focus] .batch-grid { display: none !important; }
+
+/* data-app: the Image / Video Classifier switch in the header. tag-shared: the model and workflow
+   settings and the panels, which the video side's Tag scenes uses too */
+.settings .image-app, .settings .video-app, .settings .tag-shared { display: contents; }
+body[data-app="video"] .image-app,
+body:not([data-app="video"]) .video-app,
+body[data-app="video"]:not([data-vmode="tag"]) .tag-shared,
+body[data-app="video"] .export-row { display: none !important; }
+
+/* data-vmode: the video side's Scenes / Tag scenes tabs. data-vtfocus: a scene is open in Tag scenes */
+/* Wrapper spans only: the header's buttons carry these classes too and keep their own boxes */
+.settings span.v-scenes-only, .settings span.v-tag-only { display: contents; }
+body[data-vmode="tag"] .v-scenes-only,
+body:not([data-vmode="tag"]) .v-tag-only,
+body[data-vtfocus] .vt-grid-only,
+body:not([data-vtfocus]) .vt-focus-only { display: none !important; }
+
+/* ---------- tabs ---------- */
+.tabs {
+  display: flex;
+  align-self: flex-end;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 1px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.tab {
+  border: none;
+  background: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+
+/* ---------- settings bar ---------- */
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.settings h1 {
+  font-size: 16px;
+  margin: 0 12px 2px 0;
+  white-space: nowrap;
+}
+/* The app switch reads as the page title */
+.app-kind {
+  font-size: 16px;
+  font-weight: 700;
+  margin-left: -6px;
+  padding: 3px 6px;
+  border-color: transparent;
+  background: transparent;
+  cursor: pointer;
+}
+.app-kind:hover, .app-kind:focus-visible { border-color: var(--border); background: var(--bg); }
+
+.settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings label.grow { flex: 1 1 220px; }
+.settings label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 7px;
+  color: var(--text);
+}
+
+input, select, textarea, button {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+input[type="number"] { width: 90px; }
+input[type="checkbox"] { padding: 0; }
+
+.model-row { display: flex; gap: 6px; }
+.model-row select, .model-row input { flex: 1; min-width: 0; }
+
+button { cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  padding: 7px 22px;
+}
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.status {
+  min-height: 0;
+  padding: 0 16px;
+  font-size: 12px;
+}
+.status:not(:empty) { padding: 6px 16px; }
+.status.error { color: var(--error); }
+.status.ok { color: var(--muted); }
+
+/* ---------- main layout ---------- */
+main {
+  position: relative; /* for the column handle */
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* --cols is set by layout.js when the column handle is dragged */
+  grid-template-columns: var(--cols, minmax(0, 1.4fr) minmax(320px, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+  .drop-zone { min-height: 50vh; }
+  .exif { min-height: 40vh; }
+}
+
+/* left column: image on top, metadata below */
+.left {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.left .focus-bar { margin-bottom: 12px; }
+.left .drop-zone { flex: 3 1 0; }
+
+.drop-zone {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  background: var(--surface);
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop-zone.dragover {
+  border-color: var(--accent);
+  background: var(--drop);
+}
+.drop-zone.has-image { border-style: solid; }
+
+.drop-hint {
+  text-align: center;
+  color: var(--muted);
+  pointer-events: none;
+}
+.drop-hint strong { font-size: 18px; color: var(--text); }
+
+/* preview and overlay share one box so the SVG's viewBox lines up with the contained image */
+#preview, .overlay {
+  position: absolute;
+  inset: 8px;
+  width: calc(100% - 16px);
+  height: calc(100% - 16px);
+}
+#preview { object-fit: contain; }
+.overlay { pointer-events: none; overflow: visible; }
+.overlay rect { fill: none; stroke: var(--box); }
+.overlay .tag { fill: var(--box); }
+.overlay text { fill: #fff; font-family: system-ui, sans-serif; }
+
+.image-info {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 12px;
+}
+
+.detect-strip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+.detect-strip strong { color: var(--box); }
+.detect-strip.error { color: #ffb4b4; }
+
+/* ---------- right panels ---------- */
+/* Right-hand stacks: flex columns, so row handles (.split-h) can sit between panels.
+   flex-grow gives each panel its default share; layout.js overrides it once dragged. */
+.panels {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panels > .panel { flex: 1 1 0; }
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.panel-head h2 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.meta { font-size: 12px; color: var(--muted); }
+
+textarea, .output {
+  flex: 1;
+  min-height: 80px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  resize: none;
+}
+
+.output {
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.output.error { color: var(--error); }
+.output .reasoning { color: var(--muted); font-style: italic; }
+
+.note { font-size: 12px; color: var(--muted); }
+textarea:disabled { opacity: 0.5; }
+
+/* ---------- vision result bars ---------- */
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40% 52px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+.bar-row.below { opacity: 0.45; }
+.bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar { height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--bar); }
+.bar-score { text-align: right; font-family: var(--mono); font-size: 12px; }
+.empty { color: var(--muted); }
+
+/* ---------- EXIF panel ---------- */
+.exif { flex: 2 1 0; }
+.exif.collapsed { flex: 0 0 auto !important; } /* beats a dragged size */
+.split-h:has(+ .exif.collapsed) { display: none; }
+.exif.collapsed .exif-body,
+.exif.collapsed #exifFilter,
+.exif.collapsed #copyExif { display: none; }
+.exif-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+}
+.exif-actions { display: flex; align-items: center; gap: 10px; }
+/* single-model output: JSON and raw model output share one tabbed panel */
+.panels.single-only > .output-panel { flex-grow: 2; }
+.output-panel .panel-head { align-items: center; }
+.output-panel .tabs { align-self: auto; margin: 0; }
+.output-panel .tab { padding: 3px 10px; font-size: 12px; }
+.output-panel .head-right { display: flex; align-items: baseline; gap: 12px; }
+.output-panel[data-view="json"] .view-raw,
+.output-panel[data-view="raw"] .view-json { display: none; }
+.export-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.export-row label.check { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+#exifFilter { width: 180px; padding: 3px 8px; font-size: 12px; }
+
+.exif-summary { display: flex; flex-wrap: wrap; gap: 6px; }
+.exif-summary:empty { display: none; }
+.chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--bg);
+}
+.chip a { color: var(--accent); }
+
+.exif-table { flex: 1; min-height: 60px; padding: 0; }
+.exif-table table { width: 100%; border-collapse: collapse; }
+.exif-table th, .exif-table td {
+  padding: 2px 8px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 12px;
+}
+.exif-table th.group {
+  position: sticky;
+  top: 0;
+  padding-top: 6px;
+  background: var(--surface);
+  color: var(--accent);
+  font-family: system-ui, sans-serif;
+  border-bottom: 1px solid var(--border);
+}
+.exif-table td.tag { width: 34%; color: var(--muted); word-break: break-all; }
+.exif-table td.val { word-break: break-word; white-space: pre-wrap; }
+.exif-table tr:hover td { background: var(--surface); }
+.exif-table .empty { display: block; padding: 8px; }
+
+/* ---------- workflows ---------- */
+.wf-panels > [data-pane="wf-editor"] { flex-grow: 1.5; }
+.wf-panels > [data-pane="wf-result"] { flex-grow: 0.8; }
+.wf-steps, #wfJson {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#wfJson { display: block; }
+#wfJson[hidden] { display: none; }
+.wf-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wf-add .note { flex: 1 1 100%; }
+code { font-family: var(--mono); font-size: 11.5px; }
+
+.wf-step {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  flex: 0 0 auto;
+}
+.wf-step.disabled { opacity: 0.55; }
+.wf-step-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.wf-step-head .wf-id { width: 110px; font-family: var(--mono); font-size: 12px; padding: 3px 6px; }
+.wf-step-head .wf-model { flex: 1; min-width: 0; padding: 3px 6px; }
+.wf-step-head button { padding: 2px 7px; }
+.wf-num {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--border);
+  font-size: 11px;
+  font-weight: 700;
+}
+.badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.badge.vision { background: #0e7490; color: #fff; }
+.badge.llm { background: #7c3aed; color: #fff; }
+.wf-step-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 6px 10px;
+  padding: 8px;
+}
+.wf-step-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.wf-step-body label.check { flex-direction: row; align-items: center; gap: 5px; color: var(--text); }
+.wf-step-body label.wide { grid-column: 1 / -1; }
+.wf-step-body input, .wf-step-body select, .wf-step-body textarea { padding: 4px 6px; font-size: 12px; }
+.wf-step-body textarea { min-height: 70px; resize: vertical; flex: none; }
+
+/* run panel */
+.wf-run { display: flex; flex-direction: column; gap: 6px; font-family: system-ui, sans-serif; }
+.run-step { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.run-step-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; }
+.run-step-head .state { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.run-step.running .state { color: var(--accent); }
+.run-step.done .state { color: var(--ok); }
+.run-step.failed .state { color: var(--error); }
+.run-step.skipped { opacity: 0.5; }
+.run-step-body { padding: 0 8px 6px; font-size: 12px; }
+.run-step-body:empty { display: none; }
+.run-step-body .summary { margin: 2px 0; }
+.run-step-body pre {
+  margin: 4px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.run-step-body .warn, .wf-step .warn { color: #b45309; white-space: pre-line; font-size: 12px; }
+.run-step-body details summary { cursor: pointer; color: var(--muted); font-size: 11px; margin-top: 4px; }
+
+/* ---------- batch ---------- */
+.batch-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.batch-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+}
+.batch-empty strong { font-size: 18px; color: var(--text); }
+.pending-exports { display: flex; flex-direction: column; gap: 6px; }
+.pending-export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+.pending-export span { flex: 1 1 240px; }
+.pending-export button { padding: 3px 10px; font-size: 12px; }
+.tiles {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  /* Tiles clip their overflow, so "auto" rows may shrink to nothing once the grid is taller than
+     the panel; size rows to their content instead */
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 10px;
+  padding: 3px;
+}
+.tile {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg);
+  border: 3px solid var(--tile-new);
+  border-radius: 8px;
+}
+.tile img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.tile-name {
+  display: block;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile:hover { filter: brightness(1.08); }
+.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile[data-state="done"] { border-color: var(--ok); }
+.tile[data-state="failed"] { border-color: var(--error); }
+.tile[data-state="waiting"] { border-color: #f59e0b; border-style: dashed; }
+.tile[data-state="running"] { border-color: var(--accent); animation: tile-pulse 0.9s ease-in-out infinite alternate; }
+@keyframes tile-pulse { to { border-color: transparent; } }
+.tile.no-preview img { display: none; }
+.tile.no-preview::before {
+  content: "no preview";
+  aspect-ratio: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.filter-bar input[type="search"] { flex: 1 1 260px; min-width: 0; padding: 4px 8px; }
+.filter-bar select, .filter-bar > button:not(.link) { padding: 3px 6px; font-size: 12px; }
+.filter-bar label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.filter-bar select { max-width: 200px; }
+.search-help { line-height: 1.6; }
+.tile-group {
+  grid-column: 1 / -1;
+  padding: 6px 2px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.tile-group.empty { border: none; color: var(--muted); }
+.batch-progress { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.batch-progress progress { width: 120px; accent-color: var(--accent); }
+.focus-bar { display: flex; align-items: center; gap: 6px; }
+body[data-mode="batch"] .drop-zone { cursor: default; }
+.focus-bar button { padding: 3px 10px; }
+.focus-bar .meta { margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dialog {
+  width: min(480px, calc(100vw - 32px));
+  padding: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.dialog form { display: flex; flex-direction: column; gap: 10px; }
+.dialog h2 { margin: 0; font-size: 16px; }
+.dialog label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.dialog label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+.dialog .note { margin: 0; }
+.dialog-error { margin: 0; font-size: 12px; color: var(--error); }
+.dialog-error:empty { display: none; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---------- walkthrough (tour.js) ---------- */
+.tour-btn {
+  width: 22px;
+  height: 22px;
+  margin: 0 6px 6px -16px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.tour-btn:hover { color: var(--accent); border-color: var(--accent); }
+.tour-dim {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+}
+.tour-ring {
+  position: fixed;
+  z-index: 1000;
+  border-radius: 8px;
+  outline: 2px solid var(--accent);
+  pointer-events: none;
+}
+.tour-card {
+  position: fixed;
+  z-index: 1001;
+  width: min(360px, calc(100vw - 32px));
+  padding: 14px 16px 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+}
+.tour-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.tour-head h2 { margin: 0; font-size: 15px; }
+.tour-text { margin: 8px 0 12px; font-size: 13px; line-height: 1.5; }
+.tour-text code { font-family: var(--mono); font-size: 12px; }
+.tour-actions { display: flex; align-items: center; gap: 8px; }
+.tour-actions .spacer { flex: 1; }
+.tour-actions button:not(.link) { padding: 5px 14px; }
+
+/* ---------- video ---------- */
+.v-params { display: contents; }
+.v-params input[type="number"] { width: 64px; }
+
+.video-main { grid-template-columns: var(--cols, minmax(0, 1.5fr) minmax(340px, 1fr)); }
+.v-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  overflow-y: auto; /* small windows scroll rather than squash the timeline */
+}
+
+/* The video takes whatever height the timeline box (.v-timeline-panel) leaves */
+.v-stage {
+  position: relative;
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  background: var(--surface);
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.v-stage.dragover { border-color: var(--accent); background: var(--drop); }
+.v-stage.has-video { border-style: solid; background: #000; cursor: default; }
+.v-stage.has-video .drop-hint { color: #c9ced6; }
+.v-stage.has-video .drop-hint strong { color: #fff; }
+.v-stage video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+/* upload / prepare / detect progress, over the top of the player */
+.v-busy {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 12px;
+  cursor: default;
+}
+.v-busy progress { flex: 1; min-width: 60px; }
+.v-busy .v-eta { color: #c9ced6; white-space: nowrap; }
+.v-busy button { padding: 2px 10px; font-size: 12px; color: #fff; background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.3); }
+.v-busy.error { color: #ffb4b4; }
+.v-busy.error progress { display: none; }
+
+/* A fixed default height; the video takes the rest of the column. In short windows the box
+   shrinks first, down to its min-height. The row handle (layout.js) overrides both. */
+.v-timeline-panel { flex: 0 1 410px; min-height: 200px; }
+
+.v-hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.v-timeline-panel > * { flex: 0 0 auto; }
+.v-timeline-panel > .v-track-main { flex: 1 1 0; min-height: 160px; align-items: stretch; }
+.v-track-main .v-track-label { align-self: center; }
+.v-timeline {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+/* The timeline and one row per result share columns, so cuts line up vertically */
+.v-track {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+/* Detector name, then its settings and scene count, so every run reads in full */
+.v-track-label { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.v-track-label > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-track-label .meta { white-space: normal; }
+.v-track-count { color: var(--muted); }
+.v-track-count.dragging { color: var(--accent); font-weight: 600; }
+.v-compare { display: flex; flex-direction: column; gap: 2px; max-height: 152px; overflow-y: auto; }
+.v-compare:empty { display: none; }
+.v-compare .v-track { cursor: pointer; }
+.v-compare .v-track:hover { background: var(--bg); }
+.v-compare .v-track.active { background: var(--drop); box-shadow: inset 3px 0 0 var(--accent); }
+.v-compare canvas { width: 100%; height: 18px; display: block; }
+.v-compare button { padding: 0 5px; font-size: 12px; line-height: 16px; }
+.v-compare .v-track.running { cursor: default; color: var(--muted); }
+
+.v-panels {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.v-scenes-panel { flex: 2 1 0; }
+.v-speech-panel { flex: 2 1 0; }
+.v-info-panel { flex: 1 1 0; }
+.v-scenes-panel .head-right, .v-speech-panel .head-right { display: flex; gap: 12px; }
+.v-scenes {
+  padding: 0;
+  font-family: system-ui, sans-serif;
+  white-space: normal;
+}
+.v-scenes .empty { display: block; padding: 8px; }
+.v-scene {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 4px 4px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.v-scene:hover { background: var(--surface); }
+.v-scene.playing { box-shadow: inset 3px 0 0 var(--accent); }
+.v-scene.looping { background: var(--drop); }
+.v-scene img {
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--border);
+}
+.v-scene-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 12.5px; }
+.v-scene-text .v-scene-time { font-family: var(--mono); font-size: 12px; }
+.v-more { padding: 8px; text-align: center; }
+
+/* ---------- transcript (video-speech.js) ---------- */
+.v-speech-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+.v-speech-bar select { max-width: 11em; }
+.v-speech-bar input[type="search"] { flex: 1 1 8em; min-width: 6em; }
+.v-speech {
+  padding: 0;
+  font-family: system-ui, sans-serif;
+  white-space: normal;
+}
+.v-speech .empty { display: block; padding: 8px; }
+.v-line {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr);
+  gap: 8px;
+  padding: 3px 8px 3px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.v-line:hover { background: var(--surface); }
+.v-line.playing { box-shadow: inset 3px 0 0 var(--accent); background: var(--drop); }
+.v-line-time { font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding-top: 1px; }
+.v-line mark { background: var(--drop); color: inherit; box-shadow: 0 0 0 1px var(--accent); border-radius: 2px; }
+
+.v-info { padding: 0; }
+.v-info table { width: 100%; border-collapse: collapse; }
+.v-info td { padding: 2px 8px; font-size: 12px; vertical-align: top; }
+.v-info td:first-child { width: 34%; color: var(--muted); font-family: system-ui, sans-serif; }
+.v-info td:last-child { word-break: break-word; }
+.v-info .empty { display: block; padding: 8px; }
+
+@media (max-width: 900px) {
+  .video-main { grid-template-columns: 1fr; }
+  .v-stage { min-height: 40vh; }
+  .v-timeline-panel { min-height: 0; }
+  .v-info-panel { flex: 0 0 auto; }
+  .v-scenes, .v-speech { max-height: 60vh; }
+}
+
+/* tag summaries under each scene in the Scenes list */
+.v-scene-tag {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.v-scene-tag.failed { color: var(--error); }
+
+/* ---------- tag scenes (video-tag.js) ---------- */
+.vt-scenes { min-height: 0; }
+.vt-scenes > * { flex: 0 0 auto; }
+.vt-timeline {
+  display: block;
+  width: 100%;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.vt-empty { flex: 1 1 auto; cursor: default; padding: 16px; }
+.vt-tiles { flex: 1 1 0; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.vt-tiles .tile { text-align: left; }
+.vt-tiles .tile img { aspect-ratio: 16 / 9; background: var(--border); }
+.vt-tile-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-height: 2.6em;
+  padding: 0 6px 4px;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.tile[data-state="failed"] .vt-tile-text { color: var(--error); }
+.vt-stage {
+  flex: 1 1 0;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+  border-radius: 8px;
+}
+.vt-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.vt-stage img:not([src]) { display: none; }
+.focus-bar .link { margin-left: auto; white-space: nowrap; }
+/* The timeline's hover readout can include a scene's tags: keep it to one line */
+#vHover { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- resizable layout (layout.js) ---------- */
+/* Panes keep a usable minimum; the row handle stops there */
+[data-pane] { min-height: 80px; }
+.v-stage[data-pane] { min-height: 150px; }
+.v-timeline-panel[data-pane] { min-height: 200px; }
+
+/* Row handle between stacked panels: the 12px gap between them is its grab area */
+.split-h {
+  flex: 0 0 12px;
+  position: relative;
+  cursor: row-resize;
+  touch-action: none;
+}
+.split-h::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 48px;
+  height: 4px;
+  margin-left: -24px;
+  border-radius: 2px;
+  background: var(--border);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+/* Column handle, placed over the gap between the two columns by layout.js */
+.split-v {
+  position: absolute;
+  z-index: 2;
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.split-v::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 4px;
+  height: 48px;
+  margin-top: -24px;
+  border-radius: 2px;
+  background: var(--border);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.split-h:hover::after, .split-v:hover::after,
+.split-h:focus-visible::after, .split-v:focus-visible::after,
+.split-h.dragging::after, .split-v.dragging::after { opacity: 1; background: var(--accent); }
+main:hover > .split-v::after, :is(.left, .panels, .v-left, .v-panels):hover > .split-h::after { opacity: 1; }
+.split-h:focus-visible, .split-v:focus-visible { outline: none; }
+body.resizing, body.resizing * { user-select: none; }
+
+@media (max-width: 900px) {
+  .split-v { display: none; }
+}

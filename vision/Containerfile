@@ -1,0 +1,24 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/cache/hf \
+    TORCH_HOME=/cache/torch
+
+WORKDIR /srv
+
+# torch in its own layer so changing requirements.txt doesn't re-download it
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.5.1 torchvision==0.20.1
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY server.py .
+
+RUN useradd --system --uid 1001 --create-home app \
+ && mkdir -p /cache && chown app /cache
+USER app
+
+EXPOSE 8000
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

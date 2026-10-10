@@ -1,0 +1,30 @@
+# ---> VisualStudioCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+
+# Local History for Visual Studio Code
+.history/
+
+# Built Visual Studio Code Extensions
+*.vsix
+
+
+# ---> Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-cli/
+
+# ---> macOS
+.DS_Store
+
+# local dev workflow storage and CLI output
+data/
+photo-organizer-runs/
+exports/
+# local video uploads (VIDEO_DATA)
+video-data/

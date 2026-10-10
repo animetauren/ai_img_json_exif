@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM Image Classifier</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-backend="llm" data-mode="single" data-kind="single" data-app="image" data-vmode="scenes">
+  <script>
+    // Before first paint, so the page doesn't flash the image side (or the Scenes view) when the
+    // video side (or Tag scenes) was open
+    try {
+      if (localStorage.getItem("llm-classifier-app") === "video") document.body.dataset.app = "video";
+      if (JSON.parse(localStorage.getItem("llm-classifier-video-ui"))?.mode === "tag") document.body.dataset.vmode = "tag";
+    } catch {}
+  </script>
+  <header class="settings">
+    <h1><select id="appKind" class="app-kind" aria-label="Classifier" title="Switch between photos and videos">
+      <option value="image">Image Classifier</option>
+      <option value="video">Video Classifier</option>
+    </select></h1>
+    <button id="tourBtn" type="button" class="tour-btn" title="Walkthrough: what each setting does" aria-label="Walkthrough">?</button>
+    <span class="image-app">
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab active" data-mode="single" role="tab">Single model</button>
+      <button type="button" class="tab" data-mode="workflow" role="tab">Workflows</button>
+      <button type="button" class="tab" data-mode="batch" role="tab">Batch</button>
+    </nav>
+    </span>
+
+    <span class="video-app">
+      <nav class="tabs" role="tablist">
+        <button type="button" class="tab" data-vmode="scenes" role="tab">Scenes</button>
+        <button type="button" class="tab" data-vmode="tag" role="tab">Tag scenes</button>
+      </nav>
+      <button id="vPick" type="button">Choose video…</button>
+      <input id="vFile" type="file" hidden
+        accept="video/*,.mkv,.mts,.m2ts,.ts,.avi,.mov,.webm,.flv,.wmv,.mxf,.mpg,.mpeg,.vob,.3gp">
+      <label class="grow">Video
+        <span class="model-row">
+          <select id="vRecent"></select>
+          <button id="vRefresh" type="button" title="Refresh the list of videos on the server">↻</button>
+        </span>
+      </label>
+    </span>
+
+    <!-- Run with and the model or workflow settings: shared by the image side and the video side's Tag scenes -->
+    <span class="tag-shared">
+    <span class="batch-only">
+      <label>Run with
+        <select id="batchKind">
+          <option value="single">Single model</option>
+          <option value="workflow">Workflow</option>
+        </select>
+      </label>
+    </span>
+
+    <span class="single-only">
+    <label>Backend
+      <select id="backend">
+        <option value="llm">LLM (OpenAI API)</option>
+        <option value="vision">Vision model</option>
+      </select>
+    </label>
+
+    <span class="llm-only">
+      <label class="grow">Endpoint
+        <input id="baseUrl" type="text" placeholder="http://host.containers.internal:8080/v1">
+      </label>
+      <label>API key
+        <input id="apiKey" type="password" placeholder="(optional)">
+      </label>
+      <label class="grow">Model
+        <span class="model-row">
+          <select id="modelSelect"></select>
+          <input id="modelText" type="text" placeholder="model name (optional)" hidden>
+          <button id="refreshModels" type="button" title="Refresh model list">↻</button>
+        </span>
+      </label>
+      <label>Temp
+        <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.2">
+      </label>
+      <label>Max tokens
+        <input id="maxTokens" type="number" min="16" step="16" value="1024">
+      </label>
+      <label class="check"><input id="jsonMode" type="checkbox"> Force JSON</label>
+      <span class="image-app"><label class="check" title="Also run object detection and draw its boxes on the image"><input id="withYolo" type="checkbox"> Object overlay</label></span>
+    </span>
+
+    <span class="vision-only">
+      <label class="grow">Vision model
+        <span class="model-row">
+          <select id="visionModel"></select>
+          <button id="refreshVision" type="button" title="Refresh model list">↻</button>
+        </span>
+      </label>
+      <label>Top-k
+        <input id="topK" type="number" min="1" max="50" step="1" value="5">
+      </label>
+      <label>Threshold
+        <input id="threshold" type="number" min="0" max="1" step="0.01" placeholder="auto">
+      </label>
+    </span>
+    </span>
+
+    <span class="workflow-only">
+      <label class="grow">Workflow
+        <span class="model-row">
+          <select id="wfSelect"></select>
+          <button id="wfNew" type="button" title="New empty workflow">New</button>
+          <button id="wfDuplicate" type="button" title="Copy this workflow">Duplicate</button>
+          <button id="wfDelete" type="button" title="Delete this workflow">Delete</button>
+        </span>
+      </label>
+      <button id="wfSave" type="button" title="Save changes to the server">Save</button>
+    </span>
+    </span>
+
+    <span class="image-app">
+    <span class="batch-only">
+      <button id="batchPick" type="button">Choose folder…</button>
+      <input id="batchInput" type="file" webkitdirectory multiple hidden>
+      <label class="check" title="Run all also re-runs photos that already have a result for this model or workflow"><input id="batchRerun" type="checkbox"> Re-run done</label>
+      <button id="batchExport" type="button" title="Write tagged copies of every photo with a result to a folder on the server" disabled>Export all…</button>
+    </span>
+
+    <button id="exportSettings" type="button" title="Download these settings as a file for the command-line tool (python -m app.cli)">Export settings</button>
+    <label class="check not-batch"><input id="autoRun" type="checkbox"> Auto-run on drop</label>
+    <span class="batch-only">
+      <span id="batchProgress" class="batch-progress" hidden>
+        <progress id="batchProgressBar" value="0" max="1"></progress>
+        <span id="batchProgressText"></span>
+      </span>
+    </span>
+    <button id="runBtn" type="button" class="primary" disabled>Run</button>
+    </span>
+
+    <span class="video-app">
+      <span class="v-scenes-only">
+        <label>Detector
+          <select id="vDetector"></select>
+        </label>
+        <span id="vParams" class="v-params"></span>
+      </span>
+      <span class="v-tag-only">
+        <label class="check" title="Tag all also re-runs scenes that already have a result for this model or workflow"><input id="vtRerun" type="checkbox"> Re-run done</label>
+      </span>
+      <button id="vExport" type="button" title="Download a zip of scenes.json, scenes.csv and a thumbnail of every scene, with each scene's tags from the model or workflow chosen in Tag scenes and its speech from the transcript shown" disabled>Export scenes</button>
+      <span class="v-tag-only">
+        <span id="vtProgress" class="batch-progress" hidden>
+          <progress id="vtProgressBar" value="0" max="1"></progress>
+          <span id="vtProgressText"></span>
+        </span>
+      </span>
+      <button id="vDetect" type="button" class="primary v-scenes-only" disabled>Detect scenes</button>
+      <button id="vtRun" type="button" class="primary v-tag-only" disabled>Tag all</button>
+    </span>
+  </header>
+  <div class="image-app"><div id="status" class="status"></div></div>
+  <div id="vStatus" class="status video-app"></div>
+
+  <!-- The photo side's panels; in the video side's Tag scenes, the scene grid takes the left column -->
+  <main class="tag-shared" data-layout="image" data-right-min="320">
+    <div class="split-v" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to resize the columns; double-click to reset"></div>
+    <div class="left image-app">
+      <div class="focus-bar batch-only">
+        <button id="focusBack" type="button" title="Back to all photos (Esc)">← All photos</button>
+        <button id="focusPrev" type="button" title="Previous photo (←)">‹</button>
+        <button id="focusNext" type="button" title="Next photo (→)">›</button>
+        <span id="focusName" class="meta"></span>
+      </div>
+      <section id="dropZone" class="drop-zone" tabindex="0" data-pane="photo">
+        <div id="dropHint" class="drop-hint">
+          <strong>Drop an image here</strong><br>or click to browse
+        </div>
+        <img id="preview" alt="" hidden>
+        <svg id="overlay" class="overlay" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+        <div id="imageInfo" class="image-info" hidden></div>
+        <div id="detectStrip" class="detect-strip" hidden></div>
+        <input id="fileInput" type="file" hidden>
+      </section>
+      <div class="split-h" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize; double-click to reset"></div>
+      <div id="exifPanel" class="panel exif" data-pane="exif">
+        <div class="panel-head">
+          <h2>EXIF / metadata <span id="exifCount" class="meta"></span></h2>
+          <span class="exif-actions">
+            <input id="exifFilter" type="search" placeholder="Filter tags…" spellcheck="false">
+            <button id="copyExif" type="button" class="link">copy</button>
+            <button id="toggleExif" type="button" class="link">hide</button>
+          </span>
+        </div>
+        <div class="exif-body">
+          <div id="exifSummary" class="exif-summary"></div>
+          <div id="exifTable" class="output exif-table"><span class="empty">Drop an image to read its metadata.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="batch-grid batch-only image-app">
+      <div class="panel-head">
+        <h2>Photos</h2>
+        <span id="batchSummary" class="meta"></span>
+      </div>
+      <div id="pendingExports" class="pending-exports" hidden></div>
+      <div id="filterBar" class="filter-bar" hidden>
+        <input id="batchSearch" type="search" spellcheck="false" autocomplete="off"
+          placeholder='Search… e.g. beach   category:portrait   people_count>2   exif.Model:"EOS R5"'>
+        <button id="batchSearchHelp" type="button" class="link" title="Search syntax">?</button>
+        <select id="batchStatus" title="Show photos by run status">
+          <option value="">All photos</option>
+          <option value="done">Done</option>
+          <option value="new">Not run</option>
+          <option value="failed">Failed</option>
+        </select>
+        <label>Sort <select id="batchSort"></select></label>
+        <button id="batchSortDir" type="button" data-dir="asc">↑</button>
+        <label>Group <select id="batchGroup"></select></label>
+        <button id="batchExif" type="button" class="link" hidden></button>
+      </div>
+      <div id="searchHelp" class="note search-help" hidden>
+        Words match anywhere in a photo's result, EXIF or file name. All terms must match.
+        <code>field:text</code> contains · <code>field=text</code> exact · <code>field&gt;3</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code> compare numbers or dates ·
+        <code>has:field</code> has a value · <code>-term</code> excludes · <code>"quotes"</code> for spaces.
+        Fields are result keys (<code>category</code> or the full <code>classification.category</code>), EXIF tags
+        (<code>exif.Model</code>, <code>DateTimeOriginal&gt;2024</code>), <code>name</code> and <code>status</code>.
+        EXIF fields need <em>read EXIF</em> first; photos you open are read automatically.
+      </div>
+      <div id="batchEmpty" class="batch-empty" role="button" tabindex="0">
+        <strong>Choose a folder</strong><br>to see its photos here
+      </div>
+      <div id="batchTiles" class="tiles" hidden></div>
+    </section>
+
+    <section class="panel vt-scenes video-app">
+      <div class="panel-head">
+        <h2>Scenes <span id="vtResultLabel" class="meta v-hint"></span></h2>
+        <span id="vtSummary" class="meta"></span>
+      </div>
+      <div class="focus-bar vt-focus-only">
+        <button id="vtBack" type="button" title="Back to all scenes (Esc)">← All scenes</button>
+        <button id="vtPrev" type="button" title="Previous scene (←)">‹</button>
+        <button id="vtNext" type="button" title="Next scene (→)">›</button>
+        <span id="vtFocusName" class="meta"></span>
+        <button id="vtPlay" type="button" class="link" title="Loop this scene in the Scenes view's player">play scene</button>
+      </div>
+      <canvas id="vtTimeline" class="vt-timeline" title="Each scene, coloured by whether it is tagged. Click one to open it."></canvas>
+      <div class="filter-bar vt-grid-only">
+        <input id="vtSearch" type="search" spellcheck="false" autocomplete="off"
+          placeholder='Search tags… e.g. beach   category:landscape   duration>5   -indoor'>
+        <button id="vtSearchHelp" type="button" class="link" title="Search syntax">?</button>
+        <select id="vtStatus" title="Show scenes by tagging status">
+          <option value="">All scenes</option>
+          <option value="done">Done</option>
+          <option value="new">Not run</option>
+          <option value="failed">Failed</option>
+        </select>
+        <label>Sort <select id="vtSort"></select></label>
+        <button id="vtSortDir" type="button" data-dir="asc">↑</button>
+        <label>Group <select id="vtGroup"></select></label>
+      </div>
+      <div id="vtHelp" class="note search-help vt-grid-only" hidden>
+        Words match anywhere in a scene's result. All terms must match.
+        <code>field:text</code> contains · <code>field=text</code> exact · <code>field&gt;3</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code> compare numbers ·
+        <code>has:field</code> has a value · <code>-term</code> excludes · <code>"quotes"</code> for spaces.
+        Fields are result keys (<code>category</code> or the full <code>interpret.category</code>), <code>scene</code>,
+        <code>start</code>, <code>end</code>, <code>duration</code> (seconds), <code>status</code> and <code>error</code>.
+      </div>
+      <div id="vtEmpty" class="batch-empty vt-empty" hidden></div>
+      <div id="vtTiles" class="tiles vt-tiles vt-grid-only"></div>
+      <div class="vt-stage vt-focus-only"><img id="vtFrame" alt=""></div>
+    </section>
+
+    <aside class="panels single-only">
+      <div class="panel" data-pane="single-prompt">
+        <div class="panel-head llm-only">
+          <h2>System prompt</h2>
+          <button id="resetPrompt" type="button" class="link">reset</button>
+        </div>
+        <textarea id="systemPrompt" class="llm-only" spellcheck="false"></textarea>
+        <input id="userPrompt" class="llm-only" type="text" placeholder="User prompt" spellcheck="false">
+
+        <div class="panel-head vision-only">
+          <h2>Labels <span class="meta">(one per line)</span></h2>
+          <button id="resetLabels" type="button" class="link">reset</button>
+        </div>
+        <textarea id="labels" class="vision-only" spellcheck="false"></textarea>
+        <input id="labelTemplate" class="vision-only" type="text" placeholder="This is a photo of {}." spellcheck="false" title="Text template; {} is replaced by each label">
+        <div id="labelsNote" class="note vision-only" hidden></div>
+      </div>
+      <div class="split-h" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize; double-click to reset"></div>
+      <div id="outputPanel" class="panel output-panel" data-view="json" data-pane="single-output">
+        <div class="panel-head">
+          <nav class="tabs" role="tablist">
+            <button type="button" class="tab active" data-view="json" role="tab">JSON output</button>
+            <button type="button" class="tab" data-view="raw" role="tab"><span class="llm-only">LLM output</span><span class="vision-only">Result</span></button>
+          </nav>
+          <span class="head-right">
+            <span id="outputMeta" class="meta"></span>
+            <button id="copyJson" type="button" class="link">copy JSON</button>
+          </span>
+        </div>
+        <pre id="jsonOutput" class="output view-json"></pre>
+        <pre id="rawOutput" class="output llm-only view-raw"></pre>
+        <div id="visionOutput" class="output vision-only view-raw"></div>
+        <div class="export-row">
+          <button id="exportImg" type="button" title="Download a copy of the original photo with this result written into its EXIF / XMP / IPTC metadata">Export image</button>
+          <label class="check" title="Replace metadata the photo already has. Off: tags that already have a value are left untouched."><input id="exportOverwrite" type="checkbox" class="export-overwrite"> Overwrite existing metadata</label>
+        </div>
+      </div>
+    </aside>
+
+    <aside class="panels wf-panels workflow-only">
+      <div class="panel" data-pane="wf-editor">
+        <div class="panel-head">
+          <h2>Workflow <span id="wfDirty" class="meta"></span></h2>
+          <button id="wfJsonToggle" type="button" class="link">edit as JSON</button>
+        </div>
+        <input id="wfName" type="text" placeholder="Workflow name" spellcheck="false">
+        <div id="wfSteps" class="wf-steps"></div>
+        <textarea id="wfJson" spellcheck="false" hidden></textarea>
+        <div class="wf-add">
+          <button id="wfAddVision" type="button">+ Vision step</button>
+          <button id="wfAddLlm" type="button">+ LLM step</button>
+          <span class="note">In LLM prompts, <code>{{step_id.field}}</code> inserts earlier results, e.g.
+            <code>{{objects.counts.person}}</code>, <code>{{scene.summary}}</code>, <code>{{exif.DateTimeOriginal}}</code>.
+            LLM steps use the endpoint set on the Single model tab.</span>
+        </div>
+      </div>
+      <div class="split-h" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize; double-click to reset"></div>
+      <div class="panel" data-pane="wf-steps">
+        <div class="panel-head">
+          <h2>Steps</h2>
+          <span id="wfMeta" class="meta"></span>
+        </div>
+        <div id="wfRun" class="output wf-run"><span class="empty">Drop an image and press Run.</span></div>
+      </div>
+      <div class="split-h" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize; double-click to reset"></div>
+      <div class="panel" data-pane="wf-result">
+        <div class="panel-head">
+          <h2>Result JSON</h2>
+          <button id="wfCopy" type="button" class="link">copy</button>
+        </div>
+        <pre id="wfResult" class="output"></pre>
+        <div class="export-row">
+          <button id="wfExport" type="button" title="Download a copy of the original photo with this result written into its EXIF / XMP / IPTC metadata">Export image</button>
+          <label class="check" title="Replace metadata the photo already has. Off: tags that already have a value are left untouched."><input id="wfExportOverwrite" type="checkbox" class="export-overwrite"> Overwrite existing metadata</label>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <main class="video-app video-main v-scenes-only" data-layout="video" data-right-min="340">
+    <div class="split-v" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to resize the columns; double-click to reset"></div>
+    <div class="v-left">
+      <section id="vStage" class="v-stage" tabindex="0" data-pane="video-stage">
+        <div id="vHint" class="drop-hint">
+          <strong>Drop a video here</strong><br>or click to browse. Any length or size; uploads resume if interrupted.
+        </div>
+        <video id="vPlayer" controls preload="metadata" playsinline hidden></video>
+        <div id="vNoPreview" class="drop-hint" hidden>The browser can't play this file.<br>A preview appears once the video is prepared.</div>
+        <div id="vBusy" class="v-busy" hidden>
+          <span id="vBusyText"></span>
+          <progress id="vBusyBar" max="1" value="0"></progress>
+          <span id="vBusyEta" class="v-eta"></span>
+          <button id="vCancel" type="button">Cancel</button>
+        </div>
+      </section>
+      <div class="split-h" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize; double-click to reset"></div>
+      <div class="panel v-timeline-panel" data-pane="video-timeline">
+        <div class="panel-head">
+          <h2>Timeline <span id="vTimelineMeta" class="meta v-hint"></span></h2>
+          <span id="vHover" class="meta"></span>
+        </div>
+        <div class="v-track v-track-main">
+          <span id="vTrackLabel" class="v-track-label"></span>
+          <canvas id="vTimeline" class="v-timeline"></canvas>
+          <span></span>
+        </div>
+        <div id="vCompare" class="v-compare"></div>
+      </div>
+    </div>
+
+    <aside class="v-panels">
+      <div class="panel v-scenes-panel" data-pane="video-scenes">
+        <div class="panel-head">
+          <h2>Scenes <span id="vSceneCount" class="meta"></span></h2>
+          <span class="head-right">
+            <button id="vSaveCsv" type="button" class="link" title="Download the scene list as CSV, without thumbnails">CSV</button>
+            <button id="vSaveJson" type="button" class="link" title="Download the scene list as JSON, without thumbnails">JSON</button>
+          </span>
+        </div>
+        <div id="vScenes" class="output v-scenes"><span class="empty">Choose a video, then press Detect scenes.</span></div>
+      </div>
+      <div class="split-h" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize; double-click to reset"></div>
+      <div class="panel v-speech-panel" data-pane="video-speech">
+        <div class="panel-head">
+          <h2>Transcript <span id="vsCount" class="meta"></span></h2>
+          <span class="head-right">
+            <button type="button" class="link" data-vs-export="srt" title="Download subtitles (SRT)" disabled>SRT</button>
+            <button type="button" class="link" data-vs-export="vtt" title="Download subtitles (WebVTT)" disabled>VTT</button>
+            <button type="button" class="link" data-vs-export="txt" title="Download the text with a time on each line" disabled>TXT</button>
+            <button type="button" class="link" data-vs-export="json" title="Download every line and word with its times (JSON)" disabled>JSON</button>
+          </span>
+        </div>
+        <div class="v-speech-bar">
+          <select id="vsModel" title="Whisper model: larger ones are more accurate and slower"></select>
+          <select id="vsLanguage" title="The language spoken; detected from the first speech when not set"></select>
+          <select id="vsTrack" title="Which audio track to transcribe" hidden></select>
+          <button id="vsRun" type="button" title="Transcribe the video's speech with timestamps" disabled>Transcribe</button>
+          <input id="vsSearch" type="search" placeholder="Search" spellcheck="false" autocomplete="off" title="Show only lines with these words">
+        </div>
+        <div id="vsList" class="output v-speech"><span class="empty">Choose a video, then press Transcribe.</span></div>
+      </div>
+      <div class="split-h" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize; double-click to reset"></div>
+      <div class="panel v-info-panel" data-pane="video-info">
+        <div class="panel-head">
+          <h2>Video</h2>
+          <button id="vDelete" type="button" class="link" title="Delete this video and its results from the server" disabled>delete</button>
+        </div>
+        <div id="vInfo" class="output v-info"><span class="empty">No video chosen.</span></div>
+      </div>
+    </aside>
+  </main>
+  <datalist id="llmModelList"></datalist>
+
+  <dialog id="exportDialog" class="dialog">
+    <form id="exportForm">
+      <h2>Export all</h2>
+      <label>Run name
+        <input id="exportRunName" type="text" spellcheck="false" autocomplete="off">
+      </label>
+      <p id="exportInfo" class="note"></p>
+      <label class="check"><input id="batchExportOverwrite" type="checkbox" class="export-overwrite"> Overwrite existing metadata</label>
+      <p id="exportError" class="dialog-error"></p>
+      <div class="dialog-actions">
+        <button id="exportCancel" type="button">Cancel</button>
+        <button type="submit" class="primary">Export</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/workflows.js"></script>
+  <script src="/static/batch-view.js"></script>
+  <script src="/static/batch.js"></script>
+  <script src="/static/video.js"></script>
+  <script src="/static/video-tag.js"></script>
+  <script src="/static/video-speech.js"></script>
+  <script src="/static/layout.js"></script>
+  <script src="/static/tour.js"></script>
+</body>
+</html>

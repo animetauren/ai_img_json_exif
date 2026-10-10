@@ -1,0 +1,63 @@
+services:
+  llm-classifier:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: llm-classifier:latest
+    container_name: llm-classifier
+    ports:
+      - "8090:8080"
+    environment:
+      # llama-server running on the host. host.containers.internal works for podman;
+      # for docker use http://host.docker.internal:8080/v1
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.containers.internal:8080/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-300}
+      VISION_BASE_URL: http://vision:8000
+      VIDEO_BASE_URL: http://video:8001
+    volumes:
+      - app-data:/data  # saved workflows
+      - ${VIDEO_DATA:-video-data}:/videos  # video uploads, shared with the video service
+    depends_on:
+      - vision
+      - video
+    restart: unless-stopped
+
+  # Non-LLM vision models (SigLIP 2, EfficientNetV2, ResNet-50, RT-DETRv2), CPU only
+  vision:
+    build:
+      context: ./vision
+      dockerfile: Containerfile
+    image: llm-classifier-vision:latest
+    container_name: llm-classifier-vision
+    ports:
+      - "127.0.0.1:8000:8000"  # for the CLI (python -m app.cli); localhost only
+    environment:
+      # How many models stay in RAM at once (least recently used is evicted)
+      VISION_MAX_LOADED: ${VISION_MAX_LOADED:-2}
+    volumes:
+      - vision-cache:/cache
+    restart: unless-stopped
+
+  # Video scene detection (TransNetV2, PySceneDetect, FFmpeg) and speech transcription (Whisper), CPU only
+  video:
+    build:
+      context: ./video
+      dockerfile: Containerfile
+    image: llm-classifier-video:latest
+    container_name: llm-classifier-video
+    environment:
+      # Days a video is kept after it was last opened
+      VIDEO_RETENTION_DAYS: ${VIDEO_RETENTION_DAYS:-7}
+    volumes:
+      # A 40 GB video needs 40 GB here. Set VIDEO_DATA to a host folder to keep videos
+      # outside the Docker/Podman VM's disk, e.g. VIDEO_DATA=/Volumes/Media/video-data
+      - ${VIDEO_DATA:-video-data}:/videos
+      - video-cache:/cache  # TransNetV2 and Whisper weights
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  vision-cache:
+  video-data:
+  video-cache:
