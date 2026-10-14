@@ -126,6 +126,53 @@ def run_detr(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float)
     return {"predictions": preds, "detections": detections, "counts": counts, "threshold": threshold}
 
 
+def load_yolo(name: str):
+    from ultralytics import YOLO
+
+    model = YOLO(name)
+    names = getattr(model, "names", {}) or {}
+    names = {int(k): str(v) for k, v in names.items()}
+    return model, names
+
+
+def run_yolo(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float) -> dict:
+    model, names = bundle
+    wanted_ids = None
+    if req.classes:
+        wanted = {c.strip().lower() for c in req.classes if c.strip()}
+        wanted_ids = {i for i, name in names.items() if name.lower() in wanted}
+        if not wanted_ids:
+            raise HTTPException(400, f"No detector classes match {sorted(wanted)}. Available: {', '.join(names.values())}")
+    results = model.predict(source=img, conf=threshold, verbose=False)
+    res = results[0] if results else None
+    w, h = img.size
+    detections = []
+    if res is not None and getattr(res, "boxes", None) is not None:
+        for box in res.boxes:
+            cls = int(box.cls.item()) if hasattr(box.cls, "item") else int(box.cls)
+            score = float(box.conf.item()) if hasattr(box.conf, "item") else float(box.conf)
+            if score < threshold:
+                continue
+            xyxy = box.xyxy[0].tolist() if hasattr(box.xyxy, "tolist") else list(box.xyxy[0])
+            if wanted_ids is not None and cls not in wanted_ids:
+                continue
+            detections.append({
+                "label": names.get(cls, str(cls)),
+                "score": score,
+                "box": [round(min(max(v, 0), lim), 1) for v, lim in zip(xyxy, (w, h, w, h))],
+            })
+    by_label: "OrderedDict[str, dict]" = OrderedDict()
+    for d in sorted(detections, key=lambda d: -d["score"]):
+        p = by_label.setdefault(d["label"], {"label": d["label"], "score": d["score"], "count": 0})
+        p["count"] += 1
+        if d["score"] > p["score"]:
+            p["score"] = d["score"]
+    preds = list(by_label.values())[: req.top_k]
+    counts = {label: p["count"] for label, p in by_label.items()}
+    return {"predictions": preds, "detections": detections, "counts": counts, "threshold": threshold}
+
+
+
 class Spec(BaseModel):
     id: str
     kind: str  # "classify" | "zero-shot" | "detect"
@@ -162,10 +209,20 @@ SPECS = {
             description="RT-DETRv2-S — COCO object detection (80 classes)",
             labels="coco-80", default_threshold=0.5, loader=load_detr, runner=run_detr,
         ),
+        Spec(
+            id="yolo11n", kind="detect", source="yolo11n.pt",
+            description="YOLO11n — COCO object detection (Ultralytics)",
+            labels="coco-80", default_threshold=0.5, loader=load_yolo, runner=run_yolo,
+        ),
+        Spec(
+            id="yolo11m", kind="detect", source="yolo11m.pt",
+            description="YOLO11m — COCO object detection (Ultralytics)",
+            labels="coco-80", default_threshold=0.5, loader=load_yolo, runner=run_yolo,
+        ),
     ]
 }
 # Model ids that were replaced, so saved workflows and settings files keep working
-ALIASES = {"yolov8s": "rtdetr-v2-s"}
+ALIASES = {"yolov8s": "rtdetr-v2-s", "yolov8n": "yolo11n", "yolov8x": "yolo11m"}
 
 
 # ---------- model cache ----------
