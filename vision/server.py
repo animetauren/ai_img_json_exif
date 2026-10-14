@@ -232,6 +232,75 @@ def run_florence(bundle, img: Image.Image, req: "ClassifyRequest", threshold: fl
     }
 
 
+def load_paddleocr(name: str):
+    from paddleocr import PaddleOCR
+
+    return PaddleOCR(use_angle_cls=True, lang="en")
+
+
+def run_paddleocr(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float) -> dict:
+    import numpy as np
+
+    ocr = bundle
+    result = ocr.ocr(np.array(img), cls=True)
+    lines = result[0] if result and result[0] else []
+    segments = []
+    confidences = []
+    for line in lines:
+        box, (text, score) = line[0], line[1]
+        score = float(score)
+        if score < threshold:
+            continue
+        segments.append({"text": text, "box": box, "confidence": score})
+        confidences.append(score)
+    avg = float(sum(confidences) / len(confidences)) if confidences else 0.0
+    full_text = " ".join(s["text"] for s in segments)
+    return {
+        "text": full_text,
+        "segments": segments,
+        "confidence": avg,
+        "predictions": [{"label": s["text"], "score": s["confidence"]} for s in segments],
+        "threshold": threshold,
+    }
+
+
+def load_depth_anything(name: str):
+    from transformers import AutoImageProcessor, AutoModelForDepthEstimation
+    import torch
+
+    processor = AutoImageProcessor.from_pretrained(name)
+    model = AutoModelForDepthEstimation.from_pretrained(name).eval()
+    return model, processor
+
+
+def run_depth_anything(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float) -> dict:
+    import numpy as np
+    from transformers import AutoImageProcessor
+
+    model, processor = bundle
+    inputs = processor(images=img, return_tensors="pt")
+    with torch.inference_mode():
+        outputs = model(**inputs)
+    post = processor.post_process_depth_estimation(outputs, target_sizes=[(img.height, img.width)])[0]
+    depth = post["predicted_depth"]
+    if hasattr(depth, "detach"):
+        depth = depth.detach().cpu().numpy()
+    else:
+        depth = np.asarray(depth)
+    dmin = float(np.min(depth)); dmax = float(np.max(depth)); dmean = float(np.mean(depth))
+    denom = (dmax - dmin) if (dmax - dmin) > 1e-8 else 1.0
+    normalized = (depth - dmin) / denom
+    return {
+        "depth_min": dmin,
+        "depth_max": dmax,
+        "depth_mean": dmean,
+        "depth_range": [0.0, 1.0],
+        "depth_normalized_mean": float(np.mean(normalized)),
+        "predictions": [],
+        "threshold": threshold,
+    }
+
+
 class Spec(BaseModel):
     id: str
     kind: str  # "classify" | "zero-shot" | "detect"
@@ -287,6 +356,16 @@ SPECS = {
             id="yolo11m", kind="detect", source="yolo11m.pt",
             description="YOLO11m — COCO object detection (Ultralytics)",
             labels="coco-80", default_threshold=0.5, loader=load_yolo, runner=run_yolo,
+        ),
+        Spec(
+            id="paddleocr-v4", kind="ocr", source="paddleocr",
+            description="PaddleOCR v4 — text detection and recognition",
+            labels="text", default_threshold=0.5, loader=load_paddleocr, runner=run_paddleocr,
+        ),
+        Spec(
+            id="depth-anything-v2-small", kind="depth", source="depth-anything/Depth-Anything-V2-Small-hf",
+            description="Depth Anything V2 Small — monocular depth estimation",
+            labels="depth", default_threshold=0.0, loader=load_depth_anything, runner=run_depth_anything,
         ),
     ]
 }
