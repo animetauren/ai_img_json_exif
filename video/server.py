@@ -448,7 +448,7 @@ def run_transcribe(params: dict):
         path = transcript_path(root, job.key)
         path.parent.mkdir(exist_ok=True)
         write_json(path, {
-            "key": job.key, "engine": "faster-whisper", "model": params["model"], "label": speech.label(params),
+            "key": job.key, "engine": "moonshine", "model": params["model"], "label": speech.label(params),
             "params": params, "language": out["language"], "language_probability": out["language_probability"],
             "created": time.time(), "elapsed": round(time.time() - started, 1), "duration": info["duration"],
             "segments": out["segments"],
