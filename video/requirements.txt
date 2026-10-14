@@ -4,4 +4,5 @@ uvicorn[standard]==0.54.0
 numpy==2.5.3
 scenedetect==0.7.1
 opencv-python-headless==5.0.0.93
-faster-whisper==1.2.1
+# Speech-to-text via Useful Sensors Moonshine (replaces faster-whisper/Whisper)
+useful-moonshine>=20241016

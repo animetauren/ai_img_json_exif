@@ -6,3 +6,7 @@ timm==1.0.30
 transformers==4.57.6
 sentencepiece==0.2.2
 protobuf==5.29.6
+ultralytics>=8.3.0
+paddlepaddle
+paddleocr
+einops>=0.8.0
