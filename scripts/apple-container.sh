@@ -24,14 +24,16 @@
 #
 #   brew install container && container system start
 #
-# Reaching a model server on the Mac from inside a container needs a DNS domain that
-# Apple container can resolve, which takes a sudo password once per machine:
+# A model server on the Mac is reached by the Mac's own address, so start it on
+# every interface:
 #
-#   sudo container system dns create host.container.internal --localhost 203.0.113.113
+#   llama-server -hf Qwen/Qwen3-VL-8B-Instruct-GGUF --host 0.0.0.0 --port 8080
 #
-# Skip that and put your Mac's IP in .env instead (it changes with your network):
-#
-#   echo 'LLM_BASE_URL=http://192.168.1.10:8080/v1' > .env
+# The default LLM_BASE_URL below already points at host.container.internal, and this
+# script swaps in the Mac's address when it can, so .env needs nothing. A DNS domain
+# can do the same job instead, but it takes a sudo password and turns iCloud Private
+# Relay off, so it is not worth it unless your model server is bound to 127.0.0.1
+# only. Point LLM_BASE_URL at host.container.internal explicitly in .env to use one.
 #
 set -euo pipefail
 
@@ -52,9 +54,11 @@ if [ -f .env ]; then
     value=${value%\"}; value=${value#\"}
     value=${value%\'}; value=${value#\'}
     export "$key=$value"
+    [ "$key" = "LLM_BASE_URL" ] && LLM_BASE_URL_EXPLICIT=1
   done < .env
 fi
 
+LLM_BASE_URL_EXPLICIT=${LLM_BASE_URL_EXPLICIT:-0}
 : "${LLM_BASE_URL:=http://host.container.internal:8080/v1}"
 : "${LLM_API_KEY:=}"
 : "${LLM_TIMEOUT:=300}"
@@ -91,7 +95,59 @@ VOL_VIDEO_CACHE=llm-classifier_video-cache
 # ---------------------------------------------------------------- helpers
 
 note() { printf '\033[1m==>\033[0m %s\n' "$*" >&2; }
+say() { printf '    %s\n' "$*" >&2; }
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
+# This Mac's address on the local network, which is how a container reaches a model
+# server started with llama-server --host 0.0.0.0.
+host_ip() {
+  local dev ip
+  for dev in en0 en1 en2 en3 en4 en5; do
+    ip=$(ipconfig getifaddr "$dev" 2>/dev/null || true)
+    if [ -n "$ip" ]; then printf '%s' "$ip"; return 0; fi
+  done
+  for dev in $(ifconfig -l 2>/dev/null || true); do
+    ip=$(ipconfig getifaddr "$dev" 2>/dev/null || true)
+    if [ -n "$ip" ]; then printf '%s' "$ip"; return 0; fi
+  done
+  return 1
+}
+
+# Where the web app should send its LLM requests.
+#
+# host.container.internal only resolves once the DNS domain has been registered, which
+# needs sudo and switches iCloud Private Relay off. Nothing else needs it, so the
+# default is rewritten to the Mac's address. An .env that names the domain is left
+# alone, and then the domain has to be registered.
+llm_url() {
+  case $LLM_BASE_URL in
+    *//host.container.internal:*) ;;
+    *//host.container.internal/*) ;;
+    *) printf '%s' "$LLM_BASE_URL"; return 0 ;;
+  esac
+  if [ "$LLM_BASE_URL_EXPLICIT" = 1 ]; then
+    if container system dns list 2>/dev/null | grep -q host.container.internal; then
+      say "using host.container.internal from .env; it is registered"
+      printf '%s' "$LLM_BASE_URL"
+    else
+      die "LLM_BASE_URL in .env asks for host.container.internal, but that domain is not registered.
+    Either drop that line from .env, or register it once:
+      sudo container system dns create host.container.internal --localhost 203.0.113.113
+    Registering it turns iCloud Private Relay off on this Mac."
+    fi
+    return 0
+  fi
+  local ip
+  if ip=$(host_ip); then
+    say "LLM_BASE_URL=${LLM_BASE_URL/host.container.internal/$ip}  (no DNS domain needed)"
+    say "the model server has to listen on 0.0.0.0, not just 127.0.0.1"
+    printf '%s' "${LLM_BASE_URL/host.container.internal/$ip}"
+  else
+    say "no local network address found; leaving LLM_BASE_URL=$LLM_BASE_URL"
+    say "register the domain with: sudo container system dns create host.container.internal --localhost 203.0.113.113"
+    printf '%s' "$LLM_BASE_URL"
+  fi
+}
 
 need_container() {
   command -v container >/dev/null 2>&1 ||
@@ -260,9 +316,11 @@ do_up() {
   video_ip=$(wait_for_ip "$VIDEO") || die "$VIDEO did not get an IP address"
 
   note "starting $WEB (vision $vision_ip, video $video_ip)"
+  local llm
+  llm=$(llm_url)
   container run --detach --name "$WEB" \
     --cpus "$APP_CPUS" --memory "$APP_MEMORY" \
-    --env "LLM_BASE_URL=$LLM_BASE_URL" \
+    --env "LLM_BASE_URL=$llm" \
     --env "LLM_API_KEY=$LLM_API_KEY" \
     --env "LLM_TIMEOUT=$LLM_TIMEOUT" \
     --env "VISION_BASE_URL=http://$vision_ip:8000" \
@@ -278,18 +336,12 @@ do_up() {
     die "the web app did not answer on port $APP_PORT; run: ./scripts/apple-container.sh logs"
 
   note "app on http://127.0.0.1:$APP_PORT  ·  vision on 127.0.0.1:$VISION_PORT for the CLI"
-  case $LLM_BASE_URL in
-    *host.container.internal*)
-      if container system dns list 2>/dev/null | grep -q host.container.internal; then
-        note "host.container.internal is registered; llama-server on the Mac is reachable"
-      else
-        printf '\n' >&2
-        printf 'Note: a llama-server on the Mac is not reachable yet. Register the domain once:\n' >&2
-        printf '  sudo container system dns create host.container.internal --localhost 203.0.113.113\n' >&2
-        printf 'or put your Mac'"'"'s IP in .env: LLM_BASE_URL=http://<mac-ip>:8080/v1\n' >&2
-      fi
-      ;;
-  esac
+  if [ "$LLM_BASE_URL_EXPLICIT" != 1 ] && container system dns list 2>/dev/null | grep -q host.container.internal; then
+    say ""
+    say "host.container.internal is registered but unused here. Deleting it turns iCloud"
+    say "Private Relay back on, and nothing above needs it:"
+    say "  sudo container system dns delete host.container.internal"
+  fi
 }
 
 do_down() {

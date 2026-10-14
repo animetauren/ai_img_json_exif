@@ -43,11 +43,10 @@ Apple's own [`container`](https://github.com/apple/container) runs the app witho
 ```sh
 brew install container
 container system start
-sudo container system dns create host.container.internal --localhost 203.0.113.113
 ./scripts/apple-container.sh up
 ```
 
-Open <http://127.0.0.1:8090>. The script takes `build`, `up`, `down`, `ps`, `logs [web|vision|video]` and `url`, and reads the same `.env` as `compose.yaml`.
+Open <http://127.0.0.1:8090>. The script takes `build`, `up`, `down`, `ps`, `logs [web|vision|video]` and `url`, and reads the same `.env` as `compose.yaml`. Nothing else to set up: the script works out for itself how to reach a model server on the Mac (see **Host access** below), and that is the only part of `docker compose` this cannot take verbatim.
 
 `container` behaves differently from `docker compose` in six ways, and each one needs handling:
 
@@ -65,7 +64,9 @@ Open <http://127.0.0.1:8090>. The script takes `build`, `up`, `down`, `ps`, `log
 - **Permissions.** Docker gives a fresh volume the ownership of the image folder it covers; `container` starts every volume empty and root-owned, and model loading then fails with `PermissionError: /cache/hf`. The script chowns `/cache` and `/data` to uid 1001 once, the first time.
 - **Sizes.** `container` gives every container 4 CPUs and 1 GB of RAM unless told otherwise. SigLIP 2 alone needs about 1.5 GB, so the script gives the vision and video services every core and 8 GB each, and the web app 2. Lower them with `VISION_CPUS`, `VISION_MEMORY`, `VIDEO_CPUS`, `VIDEO_MEMORY`, `APP_CPUS` and `APP_MEMORY` in `.env`.
 - **Builds.** `container build` runs in a helper container that defaults to 2 CPUs and 2 GB, which is thin for torch. `scripts/apple-container.sh build` widens it first.
-- **Host access.** `host.containers.internal` is Podman's; Apple container uses `host.container.internal`, and the `sudo` line above registers it. The answer has to be registered again after a reboot. Skip it and put your Mac's IP in `.env` instead: `LLM_BASE_URL=http://192.168.1.10:8080/v1`.
+- **Host access.** `host.containers.internal` is Podman's; Apple container has no such name, and the containers' own network is not the Mac's. A container reaches a model server on the Mac at the Mac's own address, so start it on every interface — `--host 0.0.0.0` in the Quick start above already does — and the script substitutes that address into `LLM_BASE_URL` for you, because `LLM_BASE_URL` defaults to `http://host.container.internal:8080/v1`. A `.env` that sets `LLM_BASE_URL` to anything else is left alone, so the `.env` you use with Docker carries over unchanged.
+  - `host.container.internal` also works, as a DNS domain you register with `sudo container system dns create host.container.internal --localhost 203.0.113.113`. Two reasons not to: it needs a sudo password, and **it turns iCloud Private Relay off on your Mac**. It also has to be registered again after every reboot. To delete one you have registered: `sudo container system dns delete host.container.internal`.
+  - Worth knowing which is which: the domain reaches a server bound to `127.0.0.1`, the Mac's address does not, and the Mac's address reaches a server bound to `0.0.0.0` from anywhere on your network rather than only from this Mac. Bind your model server to `0.0.0.0` only on a network you trust.
 - **Speed.** Level with Docker Desktop. Alternating the two over four rounds on a folder of 12 photos, on a 16-core Apple silicon Mac, gave a median 102 vs 100 ms per photo for ResNet-50, 203 vs 191 for EfficientNetV2-S, 634 vs 656 for SigLIP 2 and 302 vs 326 for RT-DETRv2: 1.27 s for all four against Docker's 1.28 s. Reading EXIF and writing metadata land within a few percent of each other too. Both runtimes need the machine to itself, though: on a busy host either one will lose two thirds of its speed, because three VMs are sharing the same cores.
 
 [container-compose](https://github.com/mcrich23/container-compose) does read `compose.yaml`, and mostly works, but it drops `cpus`, `ulimits` and restart policies and patches hosts files to stand in for service names, so the script is the better path. `compose.yaml` now carries an explicit `name:`, which `container-compose` needs: it takes the project name from the folder otherwise, and prefixes volumes with an underscore, which `container` rejects when the folder itself starts with a `.` or `_`.
