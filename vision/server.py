@@ -173,6 +173,47 @@ def run_yolo(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float)
 
 
 
+def load_florence(name: str):
+    from transformers import AutoModelForCausalLM, AutoProcessor
+
+    model = AutoModelForCausalLM.from_pretrained(name, trust_remote_code=True).eval()
+    processor = AutoProcessor.from_pretrained(name, trust_remote_code=True)
+    return model, processor
+
+
+def run_florence(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float) -> dict:
+    model, processor = bundle
+    task = req.label_template if req.label_template in ("<CAPTION>", "<MORE_DETAILED_CAPTION>", "<DETAILED_CAPTION>") else "<MORE_DETAILED_CAPTION>"
+    inputs = processor(text=task, images=img, return_tensors="pt")
+    # Move tensors to model device/dtype if needed
+    with torch.inference_mode():
+        generated_ids = model.generate(
+            input_ids=inputs.get("input_ids"),
+            pixel_values=inputs.get("pixel_values"),
+            max_new_tokens=1024,
+            num_beams=3,
+            do_sample=False,
+        )
+    generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+    caption = generated_text
+    try:
+        parsed = processor.post_process_generation(
+            generated_text, task=task, image_size=(img.width, img.height))
+        if isinstance(parsed, dict) and task in parsed:
+            caption = parsed[task]
+        elif isinstance(parsed, str):
+            caption = parsed
+    except Exception:  # noqa: BLE001 - fall back to raw decoded text
+        pass
+    caption = str(caption).strip()
+    return {
+        "caption": caption,
+        "description": caption,
+        "predictions": [{"label": caption, "score": 1.0}],
+        "threshold": threshold,
+    }
+
+
 class Spec(BaseModel):
     id: str
     kind: str  # "classify" | "zero-shot" | "detect"
@@ -208,6 +249,11 @@ SPECS = {
             id="rtdetr-v2-s", kind="detect", source="PekingU/rtdetr_v2_r18vd",
             description="RT-DETRv2-S — COCO object detection (80 classes)",
             labels="coco-80", default_threshold=0.5, loader=load_detr, runner=run_detr,
+        ),
+        Spec(
+            id="florence2-base", kind="caption", source="microsoft/Florence-2-base",
+            description="Florence-2 base — detailed image captioning",
+            labels="caption", default_threshold=0.0, loader=load_florence, runner=run_florence,
         ),
         Spec(
             id="yolo11n", kind="detect", source="yolo11n.pt",
