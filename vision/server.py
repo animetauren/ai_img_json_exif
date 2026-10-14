@@ -301,6 +301,46 @@ def run_depth_anything(bundle, img: Image.Image, req: "ClassifyRequest", thresho
     }
 
 
+def load_faces(name: str):
+    import insightface
+    from insightface.app import FaceAnalysis
+
+    app = FaceAnalysis(name=name, providers=["CPUExecutionProvider"])
+    app.prepare(ctx_id=-1, det_size=(640, 640))
+    return app
+
+
+def run_faces(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float) -> dict:
+    import numpy as np
+
+    app = bundle
+    faces = app.get(np.array(img))
+    out_faces = []
+    for f in faces:
+        score = float(getattr(f, "det_score", 1.0))
+        if score < threshold:
+            continue
+        bbox = [float(x) for x in getattr(f, "bbox", [])]
+        kps = None
+        if getattr(f, "kps", None) is not None:
+            kps = [[float(x), float(y)] for x, y in f.kps]
+        emb = None
+        if getattr(f, "embedding", None) is not None:
+            emb = [float(x) for x in f.embedding]
+        out_faces.append({
+            "bbox": bbox,
+            "score": score,
+            "landmarks": kps,
+            "embedding": emb,
+        })
+    return {
+        "count": len(out_faces),
+        "faces": out_faces,
+        "predictions": [{"label": "face", "score": f["score"]} for f in out_faces],
+        "threshold": threshold,
+    }
+
+
 class Spec(BaseModel):
     id: str
     kind: str  # "classify" | "zero-shot" | "detect"
@@ -366,6 +406,11 @@ SPECS = {
             id="depth-anything-v2-small", kind="depth", source="depth-anything/Depth-Anything-V2-Small-hf",
             description="Depth Anything V2 Small — monocular depth estimation",
             labels="depth", default_threshold=0.0, loader=load_depth_anything, runner=run_depth_anything,
+        ),
+        Spec(
+            id="insightface-scrfd-adaface", kind="face", source="buffalo_l",
+            description="InsightFace SCRFD detector + AdaFace embeddings — face detection and recognition",
+            labels="face", default_threshold=0.5, loader=lambda n: load_faces("buffalo_l"), runner=run_faces,
         ),
     ]
 }

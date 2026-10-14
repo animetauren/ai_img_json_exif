@@ -10,3 +10,5 @@ ultralytics>=8.3.0
 paddlepaddle
 paddleocr
 einops>=0.8.0
+insightface
+onnxruntime
