@@ -32,9 +32,43 @@ Both backends return the same top-level JSON (`category`, `tags`, `confidence`),
 
 3. Open <http://localhost:8090>.
 
-On Linux, `host.docker.internal` needs `extra_hosts: ["host.docker.internal:host-gateway"]` in `compose.yaml`. Alternatively, use the host's IP address.
+On Linux, `host.docker.internal` needs `extra_hosts: ["host.docker.internal:host-gateway"]` in `compose.yaml`. Alternatively, use the host's IP address. On macOS, [Apple containers](#apple-containers) run the same app without Docker Desktop.
 
 > **No authentication.** Run the app on a trusted network only. Photos are sent only to the model servers you configure.
+
+## Apple containers
+
+Apple's own [`container`](https://github.com/apple/container) runs the app without Docker Desktop, one lightweight VM per container. `Containerfile` is the same one Docker builds from.
+
+```sh
+brew install container
+container system start
+sudo container system dns create host.container.internal --localhost 203.0.113.113
+./scripts/apple-container.sh up
+```
+
+Open <http://127.0.0.1:8090>. The script takes `build`, `up`, `down`, `ps`, `logs [web|vision|video]` and `url`, and reads the same `.env` as `compose.yaml`.
+
+`container` behaves differently from `docker compose` in six ways, and each one needs handling:
+
+| | Docker and Podman | Apple `container` |
+| --- | --- | --- |
+| Service addresses | `http://vision:8000`, `http://video:8001` | the containers' IP addresses, read at start |
+| `/videos` | the `video-data` volume | a host folder, `video-data/` by default, bind mounted |
+| Caches and saved workflows | volumes, writable straight away | volumes, given to the app's uid on first use |
+| CPU and memory | one VM for everything | set per container by the script |
+| Restart after a reboot | `restart: unless-stopped` | none; run `./scripts/apple-container.sh up` again |
+| Compose | built in | none; the script takes its place |
+
+- **Service addresses.** `container` resolves one container's name from another only when a DNS domain is registered ([apple/container#1809](https://github.com/apple/container/issues/1809)), and there is no `--add-host`. The script reads each service's IP after starting it and passes that to the web app. Container IPs change when a VM restarts, so run `up` again after a reboot.
+- **One folder, not one volume.** A named volume can be attached to only one container at a time, and the web app and the video service both need `/videos`; the second one fails with `The storage device attachment is invalid`. A bind mount can be shared, so `/videos` is a host folder. Set `VIDEO_DATA=/Volumes/Media/video-data` in `.env` to move it off the boot disk, as you would for Docker.
+- **Permissions.** Docker gives a fresh volume the ownership of the image folder it covers; `container` starts every volume empty and root-owned, and model loading then fails with `PermissionError: /cache/hf`. The script chowns `/cache` and `/data` to uid 1001 once, the first time.
+- **Sizes.** `container` gives every container 4 CPUs and 1 GB of RAM unless told otherwise. SigLIP 2 alone needs about 1.5 GB, so the script gives the vision and video services every core and 8 GB each, and the web app 2. Lower them with `VISION_CPUS`, `VISION_MEMORY`, `VIDEO_CPUS`, `VIDEO_MEMORY`, `APP_CPUS` and `APP_MEMORY` in `.env`.
+- **Builds.** `container build` runs in a helper container that defaults to 2 CPUs and 2 GB, which is thin for torch. `scripts/apple-container.sh build` widens it first.
+- **Host access.** `host.containers.internal` is Podman's; Apple container uses `host.container.internal`, and the `sudo` line above registers it. The answer has to be registered again after a reboot. Skip it and put your Mac's IP in `.env` instead: `LLM_BASE_URL=http://192.168.1.10:8080/v1`.
+- **Speed.** Level with Docker Desktop. Alternating the two over four rounds on a folder of 12 photos, on a 16-core Apple silicon Mac, gave a median 102 vs 100 ms per photo for ResNet-50, 203 vs 191 for EfficientNetV2-S, 634 vs 656 for SigLIP 2 and 302 vs 326 for RT-DETRv2: 1.27 s for all four against Docker's 1.28 s. Reading EXIF and writing metadata land within a few percent of each other too. Both runtimes need the machine to itself, though: on a busy host either one will lose two thirds of its speed, because three VMs are sharing the same cores.
+
+[container-compose](https://github.com/mcrich23/container-compose) does read `compose.yaml`, and mostly works, but it drops `cpus`, `ulimits` and restart policies and patches hosts files to stand in for service names, so the script is the better path. `compose.yaml` now carries an explicit `name:`, which `container-compose` needs: it takes the project name from the folder otherwise, and prefixes volumes with an underscore, which `container` rejects when the folder itself starts with a `.` or `_`.
 
 ## Recommended LLM models
 
@@ -173,6 +207,8 @@ docker compose up -d     # the vision service listens on 127.0.0.1:8000 for the 
 
 .venv-cli/bin/python -m app.cli catalog.settings.json ~/Pictures/Trip --tag --zip
 ```
+
+`./scripts/apple-container.sh up` publishes the same `127.0.0.1:8000` when you use [Apple containers](#apple-containers).
 
 | Flag          | Output                                                        |
 | ------------- | ------------------------------------------------------------- |

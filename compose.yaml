@@ -1,3 +1,6 @@
+# The project name, so volumes are llm-classifier_app-data wherever the repo is checked out
+name: llm-classifier
+
 services:
   llm-classifier:
     build:
