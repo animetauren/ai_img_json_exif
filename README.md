@@ -255,6 +255,23 @@ docker compose up -d     # the vision service listens on 127.0.0.1:8000 for the 
 - The API key is never saved in the settings file. Pass `--api-key` or set `LLM_API_KEY`.
 - See `--help` for all options.
 
+## Model modernization (multi-modal pipelines)
+
+Legacy models were migrated to newer architectures while preserving JSON output schemas and
+EXIF write-back contracts. Detection, caption, OCR, depth and face endpoints were added to
+`vision/server.py`; speech transcription moved to Moonshine.
+
+| Capability | Previous (legacy) | Replacement (new) | Primary use case | Approx. size / notes |
+| --- | --- | --- | --- | --- |
+| Image captioning & description | Salesforce BLIP (`blip-image-captioning-base`) | Microsoft Florence-2-Base (`microsoft/Florence-2-base`) | Detailed captions/descriptions via `<MORE_DETAILED_CAPTION>` / `<CAPTION>` | ~0.23-0.77 B params; trust_remote_code |
+| Audio transcription (STT) | OpenAI Whisper (`whisper-base` / `whisper-small`) | Useful Sensors Moonshine (`moonshine/base` / `tiny`) | 16 kHz mono PCM -> timed transcript segments | ~30 M base / ~10 M tiny; max 64 s/call |
+| Content safety / NSFW | Falconsai NSFW (`falconsai/nsfw_image_detection`) | SigLIP-based safety classifier (`google/siglip2-base-patch16-224`) | `nsfw` / `safe` scores + confidence | sigmoid pairwise scores |
+| Zero-shot classification & search | OpenAI CLIP (`clip-vit-base/large`) | Google SigLIP 2 Base (`google/siglip2-base-patch16-224`) | Custom label scoring; normalized embeddings | pairwise sigmoid, L2-normalized vectors |
+| Object detection & tagging | Ultralytics YOLOv8 (`yolov8n/x.pt`) | Ultralytics YOLO11 (`yolo11n/m.pt`, >=8.3) | `[x1,y1,x2,y2]` boxes, class names, confidence | COCO-80; dynamic GPU/CPU |
+| OCR | EasyOCR (CRAFT + BiLSTM) | PaddleOCR v4 (`PaddleOCR(use_angle_cls=True, lang='en')`) | Text segments, polygons, avg confidence | angle classification enabled |
+| Monocular depth | Intel DPT / MiDaS (`dpt-large`) | Depth Anything V2 (`depth-anything/...-Small-hf`) | Relative depth map, 0-1 normalization, grayscale | small/base checkpoints |
+| Face detection & embeddings | InsightFace `buffalo_l` (RetinaFace + ArcFace) | InsightFace SCRFD + AdaFace | Face count, boxes, landmarks, embeddings | SCRFD detector + AdaFace features |
+
 ## Vision models
 
 | Model              | Kind           | Labels        | Source                                     |
@@ -270,7 +287,7 @@ docker compose up -d     # the vision service listens on 127.0.0.1:8000 for the 
 - **Adding a model:** add a `Spec` to `SPECS` in [vision/server.py](vision/server.py).
 - **Licences:** all model code and weights are Apache-2.0 or BSD. The ImageNet classifiers were trained on ImageNet, whose terms are for non-commercial research.
 - **Video detectors:** TransNetV2 ([soCzech/TransNetV2](https://github.com/soCzech/TransNetV2), MIT) is vendored in [video/transnetv2.py](video/transnetv2.py), and its PyTorch weights download on first use. PySceneDetect is BSD-3-Clause. FFmpeg comes from Debian's packages.
-- **Speech:** faster-whisper and its Silero VAD are MIT, as are the Whisper weights; they download on first use, pinned to a revision ([video/transcribe.py](video/transcribe.py)).
+- **Speech:** Moonshine (Useful Sensors) replaces faster-whisper/Whisper; weights download on first use ([video/transcribe.py](video/transcribe.py)).
 
 ## Development
 
