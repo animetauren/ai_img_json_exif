@@ -30,9 +30,18 @@ Both backends return the same top-level JSON (`category`, `tags`, `confidence`),
    docker compose up --build -d
    ```
 
+   On macOS, [Apple's own container runtime](#apple-containers) runs the same app with no Docker Desktop, Podman or Colima at all:
+
+   ```sh
+   brew install container && container system start
+   ./scripts/apple-container.sh up
+   ```
+
+   Skip the `.env` line for that one. The script finds the Mac's address by itself, and the same `Containerfile` and the same `compose.yaml` are used either way.
+
 3. Open <http://localhost:8090>.
 
-On Linux, `host.docker.internal` needs `extra_hosts: ["host.docker.internal:host-gateway"]` in `compose.yaml`. Alternatively, use the host's IP address. On macOS, [Apple containers](#apple-containers) run the same app without Docker Desktop.
+On Linux, `host.docker.internal` needs `extra_hosts: ["host.docker.internal:host-gateway"]` in `compose.yaml`. Alternatively, use the host's IP address.
 
 > **No authentication.** Run the app on a trusted network only. Photos are sent only to the model servers you configure.
 
@@ -67,9 +76,30 @@ Open <http://127.0.0.1:8090>. The script takes `build`, `up`, `down`, `ps`, `log
 - **Host access.** `host.containers.internal` is Podman's; Apple container has no such name, and the containers' own network is not the Mac's. A container reaches a model server on the Mac at the Mac's own address, so start it on every interface — `--host 0.0.0.0` in the Quick start above already does — and the script substitutes that address into `LLM_BASE_URL` for you, because `LLM_BASE_URL` defaults to `http://host.container.internal:8080/v1`. A `.env` that sets `LLM_BASE_URL` to anything else is left alone, so the `.env` you use with Docker carries over unchanged.
   - `host.container.internal` also works, as a DNS domain you register with `sudo container system dns create host.container.internal --localhost 203.0.113.113`. Two reasons not to: it needs a sudo password, and **it turns iCloud Private Relay off on your Mac**. It also has to be registered again after every reboot. To delete one you have registered: `sudo container system dns delete host.container.internal`.
   - Worth knowing which is which: the domain reaches a server bound to `127.0.0.1`, the Mac's address does not, and the Mac's address reaches a server bound to `0.0.0.0` from anywhere on your network rather than only from this Mac. Bind your model server to `0.0.0.0` only on a network you trust.
-- **Speed.** Level with Docker Desktop. Alternating the two over four rounds on a folder of 12 photos, on a 16-core Apple silicon Mac, gave a median 102 vs 100 ms per photo for ResNet-50, 203 vs 191 for EfficientNetV2-S, 634 vs 656 for SigLIP 2 and 302 vs 326 for RT-DETRv2: 1.27 s for all four against Docker's 1.28 s. Reading EXIF and writing metadata land within a few percent of each other too. Both runtimes need the machine to itself, though: on a busy host either one will lose two thirds of its speed, because three VMs are sharing the same cores.
+- **Speed.** Level with Docker Desktop, and 0.95× faster over all four vision models. See [Speed](#speed) below for the numbers and how they were taken.
 
 [container-compose](https://github.com/mcrich23/container-compose) does read `compose.yaml`, and mostly works, but it drops `cpus`, `ulimits` and restart policies and patches hosts files to stand in for service names, so the script is the better path. `compose.yaml` now carries an explicit `name:`, which `container-compose` needs: it takes the project name from the folder otherwise, and prefixes volumes with an underscore, which `container` rejects when the folder itself starts with a `.` or `_`.
+
+### Speed
+
+Nothing about the models changes between runtimes — the same `Containerfile`, the same wheels, the same CPU. Measured on a 16-core Apple silicon Mac (macOS 27.0.1, 64 GB), over a folder of 12 photos, restarting the stack between every measurement and alternating the two runtimes so that whatever else the machine was doing hit both equally. Median of four rounds, per photo, in milliseconds:
+
+| | Apple `container` | Docker Desktop | |
+| --- | ---: | ---: | ---: |
+| Read EXIF | 133 | 132 | 1.01× |
+| EfficientNetV2-S | 265 | 254 | 1.05× |
+| ResNet-50 | 152 | 144 | 1.06× |
+| SigLIP 2 | 707 | 779 | **0.91×** |
+| RT-DETRv2-S | 399 | 468 | **0.85×** |
+| **All four models** | **1528** | **1603** | **0.95×** |
+| Write metadata | 273 | 270 | 1.01× |
+
+Apple `container` comes out ahead on the two heaviest models and level on the rest, 0.95× over all four. Results were identical, not just timings: the same category for every photo from every model, 716 EXIF tags read and 72 tags written per round, and no errors in any of the eight runs. Docker Desktop's VM had 8 CPUs and 7.6 GB, which is its default for this machine; the script gives each container every core and 8 GB.
+
+Two caveats worth the space:
+
+- **Give the machine a rest first.** Three VMs share the same physical cores, so if anything else on the Mac is busy both runtimes lose most of their speed, and the gap between them grows to two or three times over. The table above is what you get when the machine is otherwise idle, and the spread within each runtime is wide: ResNet-50 ranged from 79 to 161 ms on Apple `container` across four identical rounds.
+- **Benchmark against a runtime you know.** Single runs are not comparable to each other on a busy machine. If you re-measure, alternate the two and compare medians, or the number you get will be an artefact of when it ran.
 
 ## Recommended LLM models
 
