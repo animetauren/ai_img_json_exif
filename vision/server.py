@@ -79,6 +79,24 @@ def run_siglip(bundle, img: Image.Image, req: "ClassifyRequest", threshold: floa
     return {"predictions": preds, "threshold": threshold}
 
 
+def run_siglip_nsfw(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float) -> dict:
+    model, processor = bundle
+    labels = ["nsfw", "safe"]
+    template = req.label_template or "a photo that is {}"
+    texts = [template.format(l) if "{}" in template else f"{template} {l}" for l in labels]
+    inputs = processor(text=texts, images=img, padding="max_length", max_length=64, return_tensors="pt")
+    with torch.inference_mode():
+        logits = model(**inputs).logits_per_image[0]
+    probs = torch.sigmoid(logits)
+    nsfw_p = float(probs[0]); safe_p = float(probs[1])
+    preds = [{"label": labels[i], "score": float(probs[i])} for i in range(len(labels))]
+    order = probs.argsort(descending=True)
+    preds = [preds[int(i)] for i in order]
+    return {"nsfw": nsfw_p, "safe": safe_p, "confidence": max(nsfw_p, safe_p),
+            "predictions": preds, "threshold": threshold}
+
+
+
 # The checkpoint uses PASCAL VOC names for a few COCO classes; report the usual COCO names,
 # which are also what workflows and saved results used with YOLO
 COCO_NAMES = {
@@ -234,6 +252,11 @@ SPECS = {
             id="siglip2-base", kind="zero-shot", source="google/siglip2-base-patch16-224",
             description="SigLIP 2 base — zero-shot against your own label list",
             labels="custom", default_threshold=0.01, loader=load_siglip, runner=run_siglip,
+        ),
+        Spec(
+            id="siglip-nsfw", kind="safety", source="google/siglip2-base-patch16-224",
+            description="SigLIP-based NSFW safety classifier (sigmoid scores)",
+            labels="nsfw,safe", default_threshold=0.5, loader=load_siglip, runner=run_siglip_nsfw,
         ),
         Spec(
             id="efficientnetv2-s", kind="classify", source="tf_efficientnetv2_s.in21k_ft_in1k",
