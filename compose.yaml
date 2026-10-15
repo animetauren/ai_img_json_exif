@@ -42,7 +42,7 @@ services:
       - vision-cache:/cache
     restart: unless-stopped
 
-  # Video scene detection (TransNetV2, PySceneDetect, FFmpeg) and speech transcription (Whisper), CPU only
+  # Video scene detection (TransNetV2, PySceneDetect, FFmpeg) and speech transcription (faster-whisper), CPU only
   video:
     build:
       context: ./video
@@ -56,7 +56,7 @@ services:
       # A 40 GB video needs 40 GB here. Set VIDEO_DATA to a host folder to keep videos
       # outside the Docker/Podman VM's disk, e.g. VIDEO_DATA=/Volumes/Media/video-data
       - ${VIDEO_DATA:-video-data}:/videos
-      - video-cache:/cache  # TransNetV2 and Whisper weights
+      - video-cache:/cache  # TransNetV2 and faster-whisper weights
     restart: unless-stopped
 
 volumes:

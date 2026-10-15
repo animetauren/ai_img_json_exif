@@ -194,22 +194,23 @@ def run_yolo(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float)
 def load_florence(name: str):
     from transformers import AutoModelForCausalLM, AutoProcessor
 
-    model = AutoModelForCausalLM.from_pretrained(name, trust_remote_code=True).eval()
-    processor = AutoProcessor.from_pretrained(name, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(name).eval()
+    processor = AutoProcessor.from_pretrained(name)
     return model, processor
 
 
 def run_florence(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float) -> dict:
     model, processor = bundle
-    task = req.label_template if req.label_template in ("<CAPTION>", "<MORE_DETAILED_CAPTION>", "<DETAILED_CAPTION>") else "<MORE_DETAILED_CAPTION>"
+    task = req.label_template
+    if not (isinstance(task, str) and task.startswith("<") and task.endswith(">")):
+        task = "<MORE_DETAILED_CAPTION>"
     inputs = processor(text=task, images=img, return_tensors="pt")
-    # Move tensors to model device/dtype if needed
     with torch.inference_mode():
         generated_ids = model.generate(
             input_ids=inputs.get("input_ids"),
             pixel_values=inputs.get("pixel_values"),
-            max_new_tokens=1024,
-            num_beams=3,
+            max_new_tokens=256,
+            num_beams=1,
             do_sample=False,
         )
     generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
@@ -223,13 +224,17 @@ def run_florence(bundle, img: Image.Image, req: "ClassifyRequest", threshold: fl
             caption = parsed
     except Exception:  # noqa: BLE001 - fall back to raw decoded text
         pass
-    caption = str(caption).strip()
-    return {
-        "caption": caption,
-        "description": caption,
-        "predictions": [{"label": caption, "score": 1.0}],
-        "threshold": threshold,
-    }
+    if isinstance(caption, (list, tuple, dict)):
+        caption = str(caption)
+    caption = caption.strip()
+    out = {"threshold": threshold, "predictions": []}
+    if "OCR" in task.upper():
+        out["text"] = caption
+        out["segments"] = [{"text": caption, "box": None, "confidence": 1.0}]
+    else:
+        out["caption"] = caption
+        out["description"] = caption
+    return out
 
 
 def load_paddleocr(name: str):
@@ -314,7 +319,7 @@ def run_faces(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float
     import numpy as np
 
     app = bundle
-    faces = app.get(np.array(img))
+    faces = app.get(np.array(img)[:, :, ::-1])
     out_faces = []
     for f in faces:
         score = float(getattr(f, "det_score", 1.0))
@@ -324,19 +329,15 @@ def run_faces(bundle, img: Image.Image, req: "ClassifyRequest", threshold: float
         kps = None
         if getattr(f, "kps", None) is not None:
             kps = [[float(x), float(y)] for x, y in f.kps]
-        emb = None
-        if getattr(f, "embedding", None) is not None:
-            emb = [float(x) for x in f.embedding]
         out_faces.append({
             "bbox": bbox,
             "score": score,
             "landmarks": kps,
-            "embedding": emb,
         })
     return {
         "count": len(out_faces),
         "faces": out_faces,
-        "predictions": [{"label": "face", "score": f["score"]} for f in out_faces],
+        "predictions": [],
         "threshold": threshold,
     }
 
@@ -363,11 +364,6 @@ SPECS = {
             labels="custom", default_threshold=0.01, loader=load_siglip, runner=run_siglip,
         ),
         Spec(
-            id="siglip-nsfw", kind="safety", source="google/siglip2-base-patch16-224",
-            description="SigLIP-based NSFW safety classifier (sigmoid scores)",
-            labels="nsfw,safe", default_threshold=0.5, loader=load_siglip, runner=run_siglip_nsfw,
-        ),
-        Spec(
             id="efficientnetv2-s", kind="classify", source="tf_efficientnetv2_s.in21k_ft_in1k",
             description="EfficientNetV2-S — ImageNet-1k classifier",
             labels="imagenet-1k", default_threshold=0.05, loader=load_timm, runner=run_timm,
@@ -388,19 +384,9 @@ SPECS = {
             labels="caption", default_threshold=0.0, loader=load_florence, runner=run_florence,
         ),
         Spec(
-            id="yolo11n", kind="detect", source="yolo11n.pt",
-            description="YOLO11n — COCO object detection (Ultralytics)",
-            labels="coco-80", default_threshold=0.5, loader=load_yolo, runner=run_yolo,
-        ),
-        Spec(
-            id="yolo11m", kind="detect", source="yolo11m.pt",
-            description="YOLO11m — COCO object detection (Ultralytics)",
-            labels="coco-80", default_threshold=0.5, loader=load_yolo, runner=run_yolo,
-        ),
-        Spec(
-            id="paddleocr-v4", kind="ocr", source="paddleocr",
-            description="PaddleOCR v4 — text detection and recognition",
-            labels="text", default_threshold=0.5, loader=load_paddleocr, runner=run_paddleocr,
+            id="florence2-ocr", kind="ocr", source="microsoft/Florence-2-base",
+            description="Florence-2 base — OCR",
+            labels="text", default_threshold=0.0, loader=load_florence, runner=run_florence,
         ),
         Spec(
             id="depth-anything-v2-small", kind="depth", source="depth-anything/Depth-Anything-V2-Small-hf",
@@ -408,14 +394,14 @@ SPECS = {
             labels="depth", default_threshold=0.0, loader=load_depth_anything, runner=run_depth_anything,
         ),
         Spec(
-            id="insightface-scrfd-adaface", kind="face", source="buffalo_l",
-            description="InsightFace SCRFD detector + AdaFace embeddings — face detection and recognition",
+            id="insightface-buffalo-l", kind="face", source="buffalo_l",
+            description="InsightFace buffalo_l — face detection and landmarks (non-commercial research weights)",
             labels="face", default_threshold=0.5, loader=lambda n: load_faces("buffalo_l"), runner=run_faces,
         ),
     ]
 }
 # Model ids that were replaced, so saved workflows and settings files keep working
-ALIASES = {"yolov8s": "rtdetr-v2-s", "yolov8n": "yolo11n", "yolov8x": "yolo11m"}
+ALIASES = {"yolov8s": "rtdetr-v2-s"}
 
 
 # ---------- model cache ----------

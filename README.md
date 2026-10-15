@@ -257,37 +257,30 @@ docker compose up -d     # the vision service listens on 127.0.0.1:8000 for the 
 
 ## Model modernization (multi-modal pipelines)
 
-Legacy models were migrated to newer architectures while preserving JSON output schemas and
-EXIF write-back contracts. Detection, caption, OCR, depth and face endpoints were added to
-`vision/server.py`; speech transcription moved to Moonshine.
-
-| Capability | Previous (legacy) | Replacement (new) | Primary use case | Approx. size / notes |
-| --- | --- | --- | --- | --- |
-| Image captioning & description | Salesforce BLIP (`blip-image-captioning-base`) | Microsoft Florence-2-Base (`microsoft/Florence-2-base`) | Detailed captions/descriptions via `<MORE_DETAILED_CAPTION>` / `<CAPTION>` | ~0.23-0.77 B params; trust_remote_code |
-| Audio transcription (STT) | OpenAI Whisper (`whisper-base` / `whisper-small`) | Useful Sensors Moonshine (`moonshine/base` / `tiny`) | 16 kHz mono PCM -> timed transcript segments | ~30 M base / ~10 M tiny; max 64 s/call |
-| Content safety / NSFW | Falconsai NSFW (`falconsai/nsfw_image_detection`) | SigLIP-based safety classifier (`google/siglip2-base-patch16-224`) | `nsfw` / `safe` scores + confidence | sigmoid pairwise scores |
-| Zero-shot classification & search | OpenAI CLIP (`clip-vit-base/large`) | Google SigLIP 2 Base (`google/siglip2-base-patch16-224`) | Custom label scoring; normalized embeddings | pairwise sigmoid, L2-normalized vectors |
-| Object detection & tagging | Ultralytics YOLOv8 (`yolov8n/x.pt`) | Ultralytics YOLO11 (`yolo11n/m.pt`, >=8.3) | `[x1,y1,x2,y2]` boxes, class names, confidence | COCO-80; dynamic GPU/CPU |
-| OCR | EasyOCR (CRAFT + BiLSTM) | PaddleOCR v4 (`PaddleOCR(use_angle_cls=True, lang='en')`) | Text segments, polygons, avg confidence | angle classification enabled |
-| Monocular depth | Intel DPT / MiDaS (`dpt-large`) | Depth Anything V2 (`depth-anything/...-Small-hf`) | Relative depth map, 0-1 normalization, grayscale | small/base checkpoints |
-| Face detection & embeddings | InsightFace `buffalo_l` (RetinaFace + ArcFace) | InsightFace SCRFD + AdaFace | Face count, boxes, landmarks, embeddings | SCRFD detector + AdaFace features |
+Modern model endpoints are listed in the **Vision models** table below. Speech transcription
+uses faster-whisper (Whisper on CTranslate2). Florence-2 is used for captioning and OCR;
+Depth Anything V2 Small for depth; InsightFace buffalo_l for faces.
 
 ## Vision models
 
 | Model              | Kind           | Labels        | Source                                     |
 | ------------------ | -------------- | ------------- | ------------------------------------------ |
-| `siglip2-base`     | zero-shot      | your own list | Google SigLIP 2                            |
-| `efficientnetv2-s` | classification | ImageNet-1k   | `tf_efficientnetv2_s.in21k_ft_in1k` (timm) |
-| `resnet50`         | classification | ImageNet-1k   | `resnet50.a1_in1k` (timm)                  |
-| `rtdetr-v2-s`      | detection      | COCO-80       | `PekingU/rtdetr_v2_r18vd`                  |
+| `siglip2-base`             | zero-shot      | your own list | Google SigLIP 2                            |
+| `efficientnetv2-s`         | classification | ImageNet-1k   | `tf_efficientnetv2_s.in21k_ft_in1k` (timm) |
+| `resnet50`                 | classification | ImageNet-1k   | `resnet50.a1_in1k` (timm)                  |
+| `rtdetr-v2-s`              | detection      | COCO-80       | `PekingU/rtdetr_v2_r18vd`                  |
+| `florence2-base`           | caption        | captions      | Microsoft Florence-2                       |
+| `florence2-ocr`            | ocr            | text          | Microsoft Florence-2                       |
+| `depth-anything-v2-small`  | depth          | depth         | Depth Anything V2 Small                    |
+| `insightface-buffalo-l`    | face           | faces         | InsightFace buffalo_l (research weights)   |
 
 - **Weights:** each model downloads its weights the first time it's used.
 - **Speed:** models run on CPU, at roughly 40–800 ms per image on an Apple Silicon Mac.
 - **Memory:** SigLIP 2 needs about 1.5 GB of RAM. If the container runs out of memory, give Docker more or set `VISION_MAX_LOADED=1`.
 - **Adding a model:** add a `Spec` to `SPECS` in [vision/server.py](vision/server.py).
-- **Licences:** all model code and weights are Apache-2.0 or BSD. The ImageNet classifiers were trained on ImageNet, whose terms are for non-commercial research.
+- **Licences:** all model code and weights are Apache-2.0, MIT or BSD, except InsightFace buffalo_l, whose weights are released for non-commercial research. The ImageNet classifiers were trained on ImageNet, whose terms are for non-commercial research.
 - **Video detectors:** TransNetV2 ([soCzech/TransNetV2](https://github.com/soCzech/TransNetV2), MIT) is vendored in [video/transnetv2.py](video/transnetv2.py), and its PyTorch weights download on first use. PySceneDetect is BSD-3-Clause. FFmpeg comes from Debian's packages.
-- **Speech:** Moonshine (Useful Sensors) replaces faster-whisper/Whisper; weights download on first use ([video/transcribe.py](video/transcribe.py)).
+- **Speech:** faster-whisper (Whisper on CTranslate2); weights download on first use ([video/transcribe.py](video/transcribe.py)).
 
 ## Development
 
